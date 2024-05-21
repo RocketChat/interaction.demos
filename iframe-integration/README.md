@@ -5,6 +5,7 @@ To set up this project on your local machine,
 2. Navigate to the project directory with this command:
 
 ```
+cd interaction.demos
 cd iframe-integration
 ```
 
