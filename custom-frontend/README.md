@@ -29,3 +29,5 @@ REACT_APP_ADMIN_USER_ID = '<admin-userId>'
 
 3. Run `npm install`.
 4. Run `npm start` and go to http://localhost:3001 on your browser to access the project.
+5. Enter a valid username and password of a user on your workspace. Click **Submit**. Select a room and start exchanging messages!
+
