@@ -6,7 +6,7 @@ To set up this project on your local machine,
 2. Navigate to the project directory with this command:
 
 ```
-git clone https://github.com/RocketChat/interaction.demos.git
+cd interaction.demos
 cd custom-frontend
 ```
 
