@@ -5,6 +5,7 @@ To run this project,
 2. Navigate to the project with this command and install the neccesary dependencies:
 
 ```
+cd interaction.demos
 cd chat-sdk
 yarn
 ```
