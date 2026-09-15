@@ -1,183 +1,216 @@
 import { DDPSDK } from '@rocket.chat/ddp-client';
-
 import { useState, useEffect } from 'react';
 
-// Initialize the Chat SDK with your workspace URL
-const sdk = DDPSDK.create('<your-workspace-url>');
+// One SDK instance for the whole app, created from the workspace URL in .env
+const sdk = DDPSDK.create(import.meta.env.VITE_WORKSPACE_URL);
 
+// The SDK expects the password as a SHA-256 hash in hexadecimal, not in plain text
 async function hashPassword(password) {
-  // Step 1: Convert the input string to a Uint8Array
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-
-  // Step 2: Use the SubtleCrypto API to create a hash
+  const data = new TextEncoder().encode(password);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-
-  // Step 3: Convert the hash buffer to a hex string
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hashHex = hashArray
+  return Array.from(new Uint8Array(hashBuffer))
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('');
-
-  // Step 4: Return the hashed string
-  return hashHex;
 }
 
+// Messages arrive from two sources with different timestamp formats:
+// the REST API sends an ISO string, the real-time stream sends { $date: <milliseconds> }
+function formatTime(ts) {
+  const date = new Date(ts?.$date ?? ts);
+  return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: 'numeric' });
+}
+
+// Which history endpoint to call depends on the room type
+const HISTORY_ENDPOINT = {
+  c: '/v1/channels.history', // public channel
+  p: '/v1/groups.history',   // private channel
+  d: '/v1/im.history',       // direct message
+};
 
 const App = () => {
-  // State for login form
+  // Login form
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
 
-  // State for chat
+  // Session and chat
   const [loggedIn, setLoggedIn] = useState(false);
   const [rooms, setRooms] = useState([]);
-  const [roomId, setRoomId] = useState('');
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [messages, setMessages] = useState(new Map());
   const [messageInput, setMessageInput] = useState('');
 
+  // Step 6: log in with username and password
   const loginUser = async (e) => {
     e.preventDefault();
-    await sdk.connection.connect();
-    await sdk.account.loginWithPassword(username, await hashPassword(password));
-    setLoggedIn(true);
-    setUsername('');
-    setPassword('');
-    fetchRooms();
+    setError('');
+    if (!username || !password) return;
+
+    try {
+      await sdk.connection.connect();
+      await sdk.account.loginWithPassword(username, await hashPassword(password));
+      localStorage.setItem('authToken', sdk.account.user.token);
+      setLoggedIn(true);
+      setUsername('');
+      await fetchRooms();
+    } catch (err) {
+      // The SDK rejects with { error: 401, reason: 'User not found' } for bad credentials
+      setError(err.reason || err.message || 'Login failed');
+    } finally {
+      setPassword('');
+    }
   };
 
- // Fetch Rooms
- const fetchRooms = async () => {
-  const response = await sdk.rest.get('/v1/subscriptions.get');
-  if (response && response.update) { // Verify response structure
-    setRooms(response.update); // Ensure this matches the actual structure of the response
-  }
-};
-
-const fetchRoomData = async (rid) => {
-  setRoomId(rid);
-  setSelectedRoom(rid);
-};
-
-  // Stream room messages
+  // Step 6: on reload, resume the previous session if a token was saved
   useEffect(() => {
-    return sdk.stream('room-messages', roomId, (args) => {
-      setMessages((messages) => {
-        messages.set(args._id, args);
-        return new Map(messages);
-      });
-    }).stop;
-  }, [roomId]);
+    const token = localStorage.getItem('authToken');
+    if (!token) return;
+    (async () => {
+      try {
+        await sdk.connection.connect();
+        await sdk.account.loginWithToken(token);
+        setLoggedIn(true);
+        await fetchRooms();
+      } catch {
+        localStorage.removeItem('authToken');
+      }
+    })();
+  }, []);
 
-
-    // Format ISO date
-    const formatIsoDate = (isoDate) => {
-      const date = new Date(isoDate);
-      // format for chat time, remove seconds
-      return date.toLocaleTimeString('en-US', {
-        hour: 'numeric',
-        minute: 'numeric',
-      });
-    };
-  
-// Send chat message
-const sendChatMessage = async (e, msg) => {
-  e.preventDefault();
-  await sdk.rest.post('/v1/chat.sendMessage', {
-    message: {
-      rid: roomId,
-      msg,
-    },
-  });
-
-  setMessageInput('');
-
-};
-
-return (
-  <div className="container">
-    <div className="title-section">
-      <h1>Chat SDK Example</h1>
-      <p>Rocket.Chat React + Vite App </p>
-    </div>
-    {!loggedIn ? (
-      <form onSubmit={loginUser} className="login-form">
-        <input
-          type="text"
-          placeholder="Username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-        />
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-        <button type="submit">Login</button>
-      </form>
-    ) : (
-      <div className="flex-chat-section">
-        <div className="rooms">
-          <h2>Rooms</h2>
-          <hr />
-          <ul>
-            {rooms.map((room) => (
-              <li
-                key={room._id}
-                onClick={() => fetchRoomData(room.rid)}
-                className={selectedRoom === room.rid ? 'selected' : ''}
-              >
-                {room.name}
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div className="messages">
-          {selectedRoom ? (
-            <div className="messages-col">
-              <ul className="messages-container">
-                {[...messages.values()].map((message) => (
-                  <li key={message._id} className="box">
-                    <div className="message">
-                      <p className="user">
-                        {message.u.name} - {formatIsoDate(message.ts.$date)}
-                      </p>
-                      <p className="text">{message.msg}</p>
-                    </div>
-                  </li>
-                ))}
-
-              </ul>
-              <div className="form">
-                <textarea
-                  placeholder="Type your message here..."
-                  rows="2"
-                  value={messageInput}
-                  onChange={(e) => setMessageInput(e.target.value)}
-                ></textarea>
-                <a
-                  onClick={(e) => sendChatMessage(e, messageInput)}
-                  className="send-button"
-                >
-                  Send
-                </a>
-              </div>
-            </div>
-          ) : (
-            <p className="load-message-alert">
-              Select a room to start chatting!
-            </p>
-          )}
-        </div>
-      </div>
-    )}
-  </div>
-);
-
+  const logoutUser = async () => {
+    await sdk.account.logout();
+    localStorage.removeItem('authToken');
+    setLoggedIn(false);
+    setRooms([]);
+    setSelectedRoom(null);
+    setMessages(new Map());
   };
 
-  export default App;
+  // Step 7: list the rooms the user is a member of
+  const fetchRooms = async () => {
+    const response = await sdk.rest.get('/v1/subscriptions.get');
+    setRooms(response.update || []);
+  };
 
+  // Step 7: select a room and load its recent messages
+  const selectRoom = async (room) => {
+    setSelectedRoom(room);
+    setMessages(new Map()); // clear the previous room's messages
+    setError('');
+    try {
+      const endpoint = HISTORY_ENDPOINT[room.t];
+      if (!endpoint) return;
+      const { messages: history } = await sdk.rest.get(`${endpoint}?roomId=${room.rid}&count=50`);
+      // Skip system messages (they carry a `t` field), and store oldest first for display
+      const userMessages = history.filter((m) => !m.t).reverse();
+      setMessages(new Map(userMessages.map((m) => [m._id, m])));
+    } catch (err) {
+      setError('Could not load message history');
+    }
+  };
 
+  // Step 7: receive new messages for the selected room in real time
+  useEffect(() => {
+    if (!selectedRoom) return;
+    const stream = sdk.stream('room-messages', selectedRoom.rid, (message) => {
+      if (message.t) return; // ignore system messages
+      setMessages((current) => new Map(current).set(message._id, message));
+    });
+    return () => stream.stop();
+  }, [selectedRoom]);
+
+  // Step 7: send a message to the selected room
+  const sendChatMessage = async (e) => {
+    e.preventDefault();
+    const msg = messageInput.trim();
+    if (!msg || !selectedRoom) return;
+    try {
+      await sdk.rest.post('/v1/chat.sendMessage', {
+        message: { rid: selectedRoom.rid, msg },
+      });
+      setMessageInput('');
+    } catch {
+      setError('Could not send the message');
+    }
+  };
+
+  return (
+    <div className="container">
+      <div className="title-section">
+        <h1>Chat SDK Example</h1>
+        <p>Rocket.Chat React + Vite App</p>
+      </div>
+
+      {!loggedIn ? (
+        <form onSubmit={loginUser} className="login-form">
+          <input
+            type="text"
+            placeholder="Username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <button type="submit">Login</button>
+          {error && <p className="error">{error}</p>}
+        </form>
+      ) : (
+        <div className="flex-chat-section">
+          <div className="rooms">
+            <h2>Rooms</h2>
+            <hr />
+            <ul>
+              {rooms.map((room) => (
+                <li
+                  key={room._id}
+                  onClick={() => selectRoom(room)}
+                  className={selectedRoom?.rid === room.rid ? 'selected' : ''}
+                >
+                  {room.fname || room.name}
+                </li>
+              ))}
+            </ul>
+            <button type="button" onClick={logoutUser}>Logout</button>
+          </div>
+
+          <div className="messages">
+            {selectedRoom ? (
+              <div className="messages-col">
+                <ul className="messages-container">
+                  {[...messages.values()].map((message) => (
+                    <li key={message._id}>
+                      <div className="message">
+                        <p className="user">
+                          {message.u.name || message.u.username} - {formatTime(message.ts)}
+                        </p>
+                        <p className="text">{message.msg}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                <form className="composer" onSubmit={sendChatMessage}>
+                  <textarea
+                    placeholder="Type your message here..."
+                    rows="2"
+                    value={messageInput}
+                    onChange={(e) => setMessageInput(e.target.value)}
+                  />
+                  <button type="submit">Send</button>
+                </form>
+                {error && <p className="error">{error}</p>}
+              </div>
+            ) : (
+              <p className="load-message-alert">Select a room to start chatting</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default App;
