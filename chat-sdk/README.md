@@ -1,15 +1,22 @@
-# Example Web App using Rocket.Chat Chat SDK in a React+Vite web app
+# Chat SDK example
 
-To run this project,
-1. Clone the repository using `git clone https://github.com/RocketChat/interaction.demos.git`.
-2. Navigate to the project with this command and install the neccesary dependencies:
+Example React application for the [Chat SDK tutorial](https://developer.rocket.chat/docs/chat-sdk) in the Rocket.Chat Chat Engine documentation. It logs in to a workspace with `@rocket.chat/ddp-client`, lists the user's rooms, loads message history, and sends and receives messages in real time.
 
+## Requirements
+
+- Node.js 22 or later
+- A Rocket.Chat workspace (8.7 or later) with CORS enabled for the app origin
+
+## Run
+
+```bash
+npm install
+cp .env.example .env
+npm run dev
 ```
-cd interaction.demos
-cd chat-sdk
-yarn
-```
-3. Navigate to _src/App.jsx_  and replace `<your-workspace-url>` with your workspace URL. 
-4. Run `yarn dev` and  go to _http://localhost:5173_ to access the web app.
-5. Enter a valid username and password of a user on your workspace. Click **Submit**. Select a room and start exchanging messages!
- 
+
+Set `VITE_WORKSPACE_URL` in `.env` to your workspace URL, then open the URL that Vite prints and log in with a workspace user.
+
+## Note on installation
+
+`package.json` includes an `overrides` entry for `typia`. Without it, `npm install` fails because of how `@rocket.chat/core-typings` currently declares that dependency. The tutorial explains this in the installation step.
